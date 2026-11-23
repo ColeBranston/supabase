@@ -43,9 +43,16 @@ const markerEnd = {
   height: 16,
 }
 
-export const ReplicationDiagram = () => {
+export const ReplicationDiagram = ({
+  pipelineId,
+  clusterId: selectedClusterId,
+}: { pipelineId?: string; clusterId?: string } = {}) => {
+  const isDetail = pipelineId !== undefined
   const { ref: projectRef } = useParams()
-  const { groups } = useReplicationClusterGroups()
+  const { groups: availableGroups } = useReplicationClusterGroups()
+  const groups = pipelineId
+    ? availableGroups.filter(({ clusterId }) => clusterId === selectedClusterId)
+    : availableGroups
   const { data: project } = useSelectedProjectQuery()
   const pipelineResults = useQueries({
     queries: groups.map(({ clusterId }) =>
@@ -58,12 +65,17 @@ export const ReplicationDiagram = () => {
     ),
   })
   const pipelineCount = pipelineResults.reduce(
-    (count, result) => count + (result.data?.pipelines.length ?? 0),
+    (count, result) =>
+      count +
+      (result.data?.pipelines.filter((pipeline) => !pipelineId || pipeline.id === pipelineId)
+        .length ?? 0),
     0
   )
   const isCompact = pipelineCount > MAX_VISIBLE_PIPELINES
   const regions = groups.flatMap(({ clusterId, region }, index) => {
-    const pipelines = pipelineResults[index].data?.pipelines ?? []
+    const pipelines = (pipelineResults[index].data?.pipelines ?? []).filter(
+      (pipeline) => !pipelineId || pipeline.id === pipelineId
+    )
     const destinations = destinationResults[index].data?.destinations ?? []
     if (!pipelines.length) return []
     return [
@@ -100,11 +112,12 @@ export const ReplicationDiagram = () => {
     {
       id: 'source',
       type: 'overview',
-      position: { x: 0, y: (contentHeight - 88) / 2 },
+      position: { x: 0, y: 0 },
       width: 250,
       height: 88,
       data: {
         kind: 'source',
+        sourceHandles: [{ id: 'source', top: 32 }],
         content: (
           <>
             <OverviewRegion
@@ -118,7 +131,7 @@ export const ReplicationDiagram = () => {
     },
   ]
   const edges: OverviewEdge[] = []
-  let regionY = (contentHeight - regionsHeight) / 2
+  let regionY = 0
   regions.forEach(({ id, clusterId, region, entries }, index) => {
     nodes.push({
       id,
@@ -128,26 +141,37 @@ export const ReplicationDiagram = () => {
       height: regionHeights[index],
       data: {
         kind: 'pipeline',
+        targetHandles: [{ id: 'detail', top: 32 }],
         sourceHandles: isCompact
           ? undefined
-          : entries.map(({ pipeline }, index) => ({ id: pipeline.id, top: 76 + index * 48 })),
+          : entries.map(({ pipeline }, index) => ({
+              id: pipeline.id,
+              top: pipelineId ? 32 : 76 + index * 48,
+            })),
         content: (
           <>
             <OverviewRegion name={region?.region_name} code={region?.region_code ?? undefined} />
             {isCompact ? (
-              <p className="text-foreground-light">{`${entries.length} ${entries.length === 1 ? 'pipeline' : 'pipelines'}`}</p>
+              <p className="border-t border-muted px-1 pt-3 pb-1 text-foreground-light">{`${entries.length} ${entries.length === 1 ? 'pipeline' : 'pipelines'}`}</p>
             ) : (
               <div className="border-t border-muted pt-2">
                 {entries.map(({ pipeline }) => (
                   <div key={pipeline.id} className="border-b border-muted last:border-b-0">
-                    <PipelineLink
-                      projectRef={projectRef}
-                      clusterId={clusterId}
-                      id={pipeline.id}
-                      name={pipeline.destination_name}
-                    >
-                      <OverviewPipelineStatus pipelineId={pipeline.id} clusterId={clusterId} />
-                    </PipelineLink>
+                    {pipelineId ? (
+                      <div className="flex h-12 flex-col justify-center gap-0.25 px-2">
+                        <span className="truncate font-medium">{pipeline.destination_name}</span>
+                        <OverviewPipelineStatus pipelineId={pipeline.id} clusterId={clusterId} />
+                      </div>
+                    ) : (
+                      <PipelineLink
+                        projectRef={projectRef}
+                        clusterId={clusterId}
+                        id={pipeline.id}
+                        name={pipeline.destination_name}
+                      >
+                        <OverviewPipelineStatus pipelineId={pipeline.id} clusterId={clusterId} />
+                      </PipelineLink>
+                    )}
                   </div>
                 ))}
               </div>
@@ -161,6 +185,7 @@ export const ReplicationDiagram = () => {
       id: `source:${id}`,
       source: 'source',
       target: id,
+      targetHandle: 'detail',
       type: 'flow',
       markerEnd,
       data: { clusterId },
@@ -180,13 +205,16 @@ export const ReplicationDiagram = () => {
         id: `${id}:${pipelineId ?? 'all'}:${destination.id}`,
         source: id,
         sourceHandle: pipelineId,
-        target: `${destination.id}:junction`,
+        target: isDetail ? destination.id : `${destination.id}:junction`,
+        markerEnd: isDetail ? markerEnd : undefined,
+        targetHandle: isDetail ? 'detail' : undefined,
         type: 'flow',
         data: {
           pipelineId,
           clusterId,
           hasStatusChip: false,
-          isConverging: true,
+          shouldAnimate: !isCompact,
+          isConverging: !isDetail,
           pipelines: entries
             .filter((entry) => entry.destination.id === destination.id)
             .map(({ pipeline }) => ({ pipelineId: pipeline.id, clusterId })),
@@ -195,38 +223,43 @@ export const ReplicationDiagram = () => {
     })
   })
   destinations.forEach((destination, index) => {
-    const destinationY = (contentHeight - destinationsHeight) / 2 + index * 112
-    nodes.push({
-      id: `${destination.id}:junction`,
-      type: 'junction',
-      position: { x: 560, y: destinationY + 60 },
-      width: 1,
-      height: 1,
-      data: { kind: 'junction', content: null },
-    })
-    edges.push({
-      id: `${destination.id}:incoming`,
-      source: `${destination.id}:junction`,
-      target: destination.id,
-      type: 'flow',
-      markerEnd,
-      data: {
-        isFinalConnection: true,
-        pipelines: regions.flatMap(({ entries, clusterId }) =>
-          entries
-            .filter((entry) => entry.destination.id === destination.id)
-            .map(({ pipeline }) => ({ pipelineId: pipeline.id, clusterId }))
-        ),
-      },
-    })
+    const destinationY = index * 112
+    if (!pipelineId) {
+      nodes.push({
+        id: `${destination.id}:junction`,
+        type: 'junction',
+        position: { x: 560, y: destinationY + 60 },
+        width: 1,
+        height: 1,
+        data: { kind: 'junction', content: null },
+      })
+      edges.push({
+        id: `${destination.id}:incoming`,
+        source: `${destination.id}:junction`,
+        target: destination.id,
+        targetHandle: 'detail',
+        type: 'flow',
+        markerEnd,
+        data: {
+          isFinalConnection: true,
+          shouldAnimate: !isCompact,
+          pipelines: regions.flatMap(({ entries, clusterId }) =>
+            entries
+              .filter((entry) => entry.destination.id === destination.id)
+              .map(({ pipeline }) => ({ pipelineId: pipeline.id, clusterId }))
+          ),
+        },
+      })
+    }
     nodes.push({
       id: destination.id,
       type: 'overview',
-      position: { x: 580, y: (contentHeight - destinationsHeight) / 2 + index * 112 },
+      position: { x: 580, y: destinationY },
       width: 250,
       height: 64,
       data: {
         kind: 'destination',
+        targetHandles: [{ id: 'detail', top: 32 }],
         content: (
           <>
             <OverviewDestination type={destination.type} label={destination.label} />
@@ -258,7 +291,7 @@ export const ReplicationDiagram = () => {
   const groupedNodes: OverviewNode[] = columns.map((column) => ({
     id: column.id,
     type: 'overviewGroup',
-    position: { x: column.x, y: (contentHeight - column.height) / 2 },
+    position: { x: column.x, y: 0 },
     width: column.width,
     height: 32,
     style: { width: column.width, height: 32 },
@@ -274,7 +307,10 @@ export const ReplicationDiagram = () => {
     groupedNodes.push({
       ...node,
       parentId: column.id,
-      position: { x: 0, y: node.position.y - (contentHeight - column.height) / 2 + 28 },
+      position: {
+        x: 0,
+        y: node.position.y + 28,
+      },
     })
   })
 

@@ -65,7 +65,7 @@ import { ReplicationClusterProvider } from '@/state/replication-cluster'
 import { SHORTCUT_IDS } from '@/state/shortcuts/registry'
 import { useShortcut } from '@/state/shortcuts/useShortcut'
 
-type DestinationSortColumn = 'name' | 'status'
+type DestinationSortColumn = 'name' | 'status' | 'region'
 type DestinationSort = `${DestinationSortColumn}:${'asc' | 'desc'}`
 
 // Worst first, so sorting ascending by status surfaces the pipelines that need attention.
@@ -212,6 +212,12 @@ export const Destinations = () => {
       const comparison = a.destination.name.localeCompare(b.destination.name)
       const nameComparison = sortDirection === 'asc' ? comparison : -comparison
       if (sortColumn === 'name') return nameComparison
+      if (sortColumn === 'region') {
+        const regionComparison = (getReplicationRegionLabel(a.group.region) ?? '').localeCompare(
+          getReplicationRegionLabel(b.group.region) ?? ''
+        )
+        return (sortDirection === 'asc' ? regionComparison : -regionComparison) || comparison
+      }
       return compareStatusNames(a.status, b.status, sortDirection) || nameComparison
     })
 
@@ -476,7 +482,15 @@ export const Destinations = () => {
                         Status
                       </TableHeadSort>
                     </TableHead>
-                    <TableHead key="region">Region</TableHead>
+                    <TableHead key="region" aria-sort={getAriaSort('region')}>
+                      <TableHeadSort
+                        column="region"
+                        currentSort={sort}
+                        onSortChange={handleSortChange}
+                      >
+                        Region
+                      </TableHeadSort>
+                    </TableHead>
                     <TableHead key="lag" className="w-[150px]">
                       Lag
                     </TableHead>

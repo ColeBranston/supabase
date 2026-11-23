@@ -2,7 +2,7 @@ import { useParams } from 'common'
 import { ActivityIcon, ChevronDownIcon, RotateCcwIcon, SearchIcon, XIcon } from 'lucide-react'
 import Link from 'next/link'
 import { parseAsString, useQueryState } from 'nuqs'
-import { useMemo, useState } from 'react'
+import { useContext, useMemo, useState } from 'react'
 import {
   Button,
   Card,
@@ -39,6 +39,7 @@ import {
   getPipelineUnifiedLogsUrl,
   getStatusName,
 } from '../Pipeline.utils'
+import { PipelineNoticeContext } from '../PipelineNoticeContext'
 import { PipelineStatusName } from '../Replication.constants'
 import { RestartTableDialog } from '../RestartTableDialog'
 import { PipelineHealthSection } from './PipelineHealthSection'
@@ -81,7 +82,7 @@ const PipelineOverviewSkeleton = () => (
     <PageSection>
       <PageSectionMeta>
         <PageSectionSummary>
-          <PageSectionTitle>Pipeline health</PageSectionTitle>
+          <PageSectionTitle id="pipeline-health">Pipeline health</PageSectionTitle>
         </PageSectionSummary>
       </PageSectionMeta>
       <PageSectionContent>
@@ -223,6 +224,7 @@ export const ReplicationPipelineStatus = () => {
 
   const showDisabledState = isPipelineBusy || !isPipelineActionable
   const canResetErroredTables = hasErroredTables && !showDisabledState
+  const isNoticeAboveOverview = useContext(PipelineNoticeContext)
   const stateNotice = getPipelineStateNotice({ requestStatus, statusName, tableStatuses })
   const isSlotDisconnected =
     !isStatusError && statusName === PipelineStatusName.STARTED && applyLagMetrics?.active === false
@@ -256,7 +258,7 @@ export const ReplicationPipelineStatus = () => {
 
         {!isLoading && (
           <PipelineHealthSection metrics={applyLagMetrics ?? undefined}>
-            {stateNotice !== undefined && (
+            {!isNoticeAboveOverview && stateNotice !== undefined && (
               <Admonition
                 type={stateNotice.type}
                 layout="responsive"
@@ -301,7 +303,7 @@ export const ReplicationPipelineStatus = () => {
                 />
               )}
 
-            {isSlotDisconnected && (
+            {!isNoticeAboveOverview && isSlotDisconnected && (
               <Admonition
                 type="warning"
                 title="Pipeline disconnected"

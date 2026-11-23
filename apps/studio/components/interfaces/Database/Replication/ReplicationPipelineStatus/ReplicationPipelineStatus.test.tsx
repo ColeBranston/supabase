@@ -104,7 +104,7 @@ describe('ReplicationPipelineStatus', () => {
       </PipelineRequestStatusProvider>
     )
 
-    expect(await screen.findByText(`Last: ${label}`)).toBeVisible()
+    expect(await screen.findByText(label)).toBeVisible()
     expect(screen.queryByText('Streaming changes as they happen')).not.toBeInTheDocument()
     expect(screen.queryByText(/The rest of the pipeline keeps running/)).not.toBeInTheDocument()
   })

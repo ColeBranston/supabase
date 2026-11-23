@@ -6,4 +6,4 @@ export const PipelineId = ({
 }: {
   pipelineId: string
   className?: string
-}) => <span className={cn('break-all font-mono', className)}>{pipelineId}</span>
+}) => <code className={cn('break-all font-mono', className)}>{pipelineId}</code>

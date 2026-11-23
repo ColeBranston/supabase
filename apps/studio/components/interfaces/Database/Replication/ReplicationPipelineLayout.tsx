@@ -3,6 +3,7 @@ import {
   ArrowUpCircleIcon,
   CircleStopIcon,
   EditIcon,
+  ListIcon,
   MoreVerticalIcon,
   PlayIcon,
   RotateCcwIcon,
@@ -28,6 +29,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from 'ui'
+import { Admonition } from 'ui-patterns/Admonition'
 import { PageBreadcrumbs, PageBreadcrumbsActions } from 'ui-patterns/PageBreadcrumbs'
 import { PageContainer } from 'ui-patterns/PageContainer'
 import {
@@ -59,10 +61,11 @@ import {
   getRestartRequestStatus,
   getStatusName,
 } from './Pipeline.utils'
-import { PipelineFlow } from './PipelineFlow'
 import { PipelineId } from './PipelineId'
+import { PipelineNoticeContext } from './PipelineNoticeContext'
 import { PipelineStatePill } from './PipelineStatePill'
 import { PipelineStatusName } from './Replication.constants'
+import { ReplicationDiagram } from './ReplicationDiagram'
 import {
   canModifyDestination,
   getReplicationDestinationType,
@@ -72,6 +75,11 @@ import {
   PIPELINE_DETAIL_GRID_CLASS_NAME,
   PipelineDetailItem,
 } from './ReplicationPipelineStatus/PipelineDetailItem'
+import {
+  getPipelineHealthNotice,
+  getPipelineStateNotice,
+} from './ReplicationPipelineStatus/PipelineOverview.utils'
+import { getFormattedLagValue } from './ReplicationPipelineStatus/ReplicationPipelineStatus.utils'
 import { UnknownDestinationNotice } from './UnknownDestinationNotice'
 import { UpdateVersionModal } from './UpdateVersionModal'
 import { useUnifiedLogsPreview } from '@/components/interfaces/App/FeaturePreview/FeaturePreviewContext'
@@ -84,6 +92,7 @@ import {
 import { useDeleteDestinationPipelineMutation } from '@/data/replication/delete-destination-pipeline-mutation'
 import { useReplicationDestinationByIdQuery } from '@/data/replication/destination-by-id-query'
 import { useReplicationPipelineByIdQuery } from '@/data/replication/pipeline-by-id-query'
+import { useReplicationPipelineReplicationStatusQuery } from '@/data/replication/pipeline-replication-status-query'
 import { useReplicationPipelineStatusQuery } from '@/data/replication/pipeline-status-query'
 import { useReplicationPipelineVersionQuery } from '@/data/replication/pipeline-version-query'
 import { useRestartPipelineMutation } from '@/data/replication/restart-pipeline-mutation'
@@ -162,8 +171,31 @@ export const ReplicationPipelineLayout = ({ children }: PropsWithChildren) => {
     onError: () => {},
   })
 
+  const { data: replicationStatusData, isError: isLagError } =
+    useReplicationPipelineReplicationStatusQuery(
+      { projectRef, pipelineId },
+      { enabled: !!pipelineId }
+    )
+  const hasTableErrors =
+    replicationStatusData?.table_statuses.some(({ state }) => state.name === 'error') === true
+  const lag = getFormattedLagValue(
+    'bytes',
+    replicationStatusData?.apply_lag?.confirmed_flush_lsn_bytes
+  )
   const statusName = getStatusName(pipelineStatusData?.status)
   const displayState = getPipelineDisplayState(requestStatus, statusName)
+  const healthNotice = getPipelineHealthNotice({
+    statusName,
+    metrics: replicationStatusData?.apply_lag,
+    isError: isLagError || isPipelineStatusError,
+  })
+  const stateNotice =
+    healthNotice ??
+    getPipelineStateNotice({
+      requestStatus,
+      statusName,
+      tableStatuses: replicationStatusData?.table_statuses ?? [],
+    })
   const destinationType = getReplicationDestinationType(destination?.config)
   const destinationIdentity = getOverviewDestination({
     destination,
@@ -263,8 +295,8 @@ export const ReplicationPipelineLayout = ({ children }: PropsWithChildren) => {
           actions={
             <PageBreadcrumbsActions>
               <DocsButton href={`${DOCS_URL}/guides/database/replication/pipelines`} />
-              <Button asChild variant="default">
-                <Link href={logsUrl}>View logs</Link>
+              <Button asChild variant="default" icon={<ListIcon />}>
+                <Link href={logsUrl}>Logs</Link>
               </Button>
             </PageBreadcrumbsActions>
           }
@@ -324,6 +356,14 @@ export const ReplicationPipelineLayout = ({ children }: PropsWithChildren) => {
                   projectRef={projectRef}
                   pipelineId={pipelineId}
                 />
+                <span aria-hidden="true">•</span>
+                <span className="text-foreground-light" aria-label="Replication lag">
+                  <span>{lag.display}</span>
+                  {replicationStatusData?.apply_lag?.confirmed_flush_lsn_bytes !== undefined &&
+                    (statusName !== PipelineStatusName.STARTED ||
+                      isLagError ||
+                      isPipelineStatusError) && <span> (last reported)</span>}
+                </span>
               </PageHeaderDescription>
             </PageHeaderSummary>
 
@@ -341,11 +381,7 @@ export const ReplicationPipelineLayout = ({ children }: PropsWithChildren) => {
                 )}
                 {canShowLifecycleAction && (
                   <Button
-                    variant={
-                      !hasUpdate && statusName === PipelineStatusName.STOPPED
-                        ? 'primary'
-                        : 'default'
-                    }
+                    variant={statusName === PipelineStatusName.STOPPED ? 'primary' : 'default'}
                     icon={lifecycleIcon}
                     onClick={() => onLifecycleAction()}
                     loading={
@@ -456,14 +492,43 @@ export const ReplicationPipelineLayout = ({ children }: PropsWithChildren) => {
       )}
 
       {pipeline && !isPipelineIdentityLoading && (
-        <PageContainer size="large" className="flex flex-col gap-y-6">
+        <PageContainer size="large" className="flex flex-col gap-y-6 pt-6">
           <PageSection>
             <PageSectionMeta>
               <PageSectionSummary>
                 <PageSectionTitle>Overview</PageSectionTitle>
               </PageSectionSummary>
             </PageSectionMeta>
-            <PageSectionContent>
+            <PageSectionContent className="space-y-6">
+              {stateNotice && statusName !== PipelineStatusName.STOPPED && (
+                <Admonition
+                  layout="responsive"
+                  type={stateNotice.type}
+                  title={stateNotice.title}
+                  description={stateNotice.description}
+                  actions={
+                    stateNotice.showLogsLink ? (
+                      <Button asChild variant="default" icon={<ListIcon />}>
+                        <Link href={logsUrl}>Logs</Link>
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              )}
+              {!stateNotice && (isPipelineStatusError || hasTableErrors) && (
+                <Admonition
+                  layout="responsive"
+                  type="warning"
+                  title="Pipeline needs attention"
+                  description="Check pipeline health and logs to investigate."
+                  actions={
+                    <a href="#pipeline-health" className="text-sm underline">
+                      View pipeline health
+                    </a>
+                  }
+                />
+              )}
+              <ReplicationDiagram pipelineId={pipeline.id} clusterId={clusterId} />
               <Card>
                 <CardContent className="pb-5">
                   <dl className={PIPELINE_DETAIL_GRID_CLASS_NAME}>
@@ -496,19 +561,12 @@ export const ReplicationPipelineLayout = ({ children }: PropsWithChildren) => {
               </Card>
             </PageSectionContent>
           </PageSection>
-          <PipelineFlow
-            pipelineRegion={
-              getReplicationRegionLabel(region) ??
-              (clusterId === undefined ? PIPELINE_REGION.displayName : undefined)
-            }
-            isRunning={statusName === PipelineStatusName.STARTED && !isTransitioning}
-            destination={destination?.name ?? pipeline.destination_name}
-            destinationType={destinationType}
-          />
         </PageContainer>
       )}
 
-      {!isUnknownDestination && (canModify || pipelineError) && children}
+      <PipelineNoticeContext.Provider value={true}>
+        {!isUnknownDestination && (canModify || pipelineError) && children}
+      </PipelineNoticeContext.Provider>
 
       <DestinationPanel />
 

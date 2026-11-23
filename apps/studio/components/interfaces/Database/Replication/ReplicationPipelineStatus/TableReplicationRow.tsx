@@ -85,7 +85,7 @@ export const TableReplicationRow = ({
               !isPipelineStopped && statusConfig.isPulsing ? (table.id % 8) * 55 : undefined
             }
           >
-            {isPipelineStopped ? `Last: ${statusConfig.label}` : statusConfig.label}
+            {statusConfig.label}
           </StateDot>
         )}
       </TableCell>
