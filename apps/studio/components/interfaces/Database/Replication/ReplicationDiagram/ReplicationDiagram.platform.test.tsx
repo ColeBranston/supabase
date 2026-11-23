@@ -1,15 +1,68 @@
-import { ReplicationDiagram } from '.'
-import { screen } from '@testing-library/react'
+import { createFileRoute } from '@tanstack/react-router'
+import { screen, within } from '@testing-library/react'
 import type { components } from 'api-types'
 import { HttpResponse } from 'msw'
 import { expect, test } from 'vitest'
 
+import { ReplicationDiagram } from './index'
 import { ReplicationClusterProvider } from '@/state/replication-cluster'
 import { PipelineRequestStatusProvider } from '@/state/replication-pipeline-request-status'
-import { customRender } from '@/tests/lib/custom-render'
+import { createMockProject } from '@/tests/helpers'
 import { addAPIMock } from '@/tests/lib/msw'
+import { renderRoute } from '@/tests/lib/route-render'
 
-test('keeps default-cluster diagram nodes separate while editing a nondefault cluster', async () => {
+test.each([
+  { count: 1, shared: false, mode: 'separate datasets' },
+  { count: 2, shared: true, mode: 'four named pipelines sharing a dataset' },
+  { count: 3, shared: true, mode: 'region counts sharing a dataset' },
+])('shows $mode across clusters while editing a nondefault cluster', async ({ count, shared }) => {
+  addAPIMock({
+    method: 'get',
+    path: '/platform/projects/:ref',
+    response: () =>
+      HttpResponse.json<components['schemas']['ProjectDetailResponse_Output']>({
+        ...createMockProject({ ref: 'default', region: 'us-east-1' }),
+        inserted_at: '2026-01-01T00:00:00.000Z',
+        subscription_id: 'subscription-1',
+        status: 'ACTIVE_HEALTHY',
+        is_physical_backups_enabled: false,
+        connectionString: null,
+        db_host: 'preview.invalid',
+        high_availability: false,
+        integration_source: null,
+        restUrl: 'http://localhost',
+        updated_at: '2026-01-01T00:00:00.000Z',
+      }),
+  })
+  addAPIMock({
+    method: 'get',
+    path: '/platform/replication/:ref/destinations',
+    response: ({ request }) => {
+      const clusterId = new URL(request.url).searchParams.get('cluster_id')
+      return HttpResponse.json<components['schemas']['DestinationsResponse_Output']>({
+        destinations: Array.from({ length: count }, (_, index) => ({
+          id: 7 + index,
+          tenant_id: 'default',
+          name: clusterId ? 'Frankfurt warehouse' : 'Singapore warehouse',
+          config: {
+            big_query: {
+              project_id: 'warehouse',
+              dataset_id: shared ? 'shared_events' : clusterId ? 'eu_events' : 'asia_events',
+            },
+          },
+        })),
+      })
+    },
+  })
+  addAPIMock({
+    method: 'get',
+    path: '/platform/replication/:ref/pipelines/:pipeline_id/status',
+    response: ({ params }) =>
+      HttpResponse.json<components['schemas']['PipelineStatusResponse_Output']>({
+        pipeline_id: String(params.pipeline_id),
+        status: { name: 'started' },
+      }),
+  })
   addAPIMock({
     method: 'get',
     path: '/platform/replication/regions',
@@ -24,68 +77,64 @@ test('keeps default-cluster diagram nodes separate while editing a nondefault cl
   })
   addAPIMock({
     method: 'get',
-    path: '/platform/projects/:ref',
-    response: () =>
-      HttpResponse.json<components['schemas']['ProjectDetailResponse_Output']>({
-        cloud_provider: 'AWS',
-        connectionString: null,
-        db_host: 'db.default.supabase.co',
-        high_availability: false,
-        id: 1,
-        inserted_at: '2026-01-01T00:00:00.000Z',
-        integration_source: null,
-        is_branch_enabled: false,
-        is_physical_backups_enabled: false,
-        name: 'Project',
-        organization_id: 1,
-        ref: 'default',
-        region: 'ap-southeast-1',
-        restUrl: 'https://default.supabase.co',
-        status: 'ACTIVE_HEALTHY',
-        subscription_id: 'subscription-1',
-        updated_at: '2026-01-01T00:00:00.000Z',
-      }),
-  })
-  addAPIMock({
-    method: 'get',
-    path: '/platform/replication/:ref/destinations',
+    path: '/platform/replication/:ref/pipelines',
     response: ({ request }) => {
-      const name = new URL(request.url).searchParams.has('cluster_id')
-        ? 'Frankfurt warehouse'
-        : 'Singapore warehouse'
-      return HttpResponse.json<components['schemas']['DestinationsResponse_Output']>({
-        destinations: [
-          {
-            id: 7,
-            name,
-            tenant_id: 'default',
-            config: {
-              big_query: {
-                connection_pool_size: 8,
-                dataset_id: 'analytics',
-                project_id: 'example-project',
-              },
-            },
-          },
-        ],
+      const clusterId = new URL(request.url).searchParams.get('cluster_id')
+      return HttpResponse.json<components['schemas']['PipelinesResponse_Output']>({
+        pipelines: Array.from({ length: count }, (_, index) => ({
+          id: String(42 + index),
+          cluster_id: clusterId ?? '1',
+          tenant_id: 'default',
+          source_id: 1,
+          source_name: 'default',
+          destination_id: 7 + index,
+          destination_name: `${clusterId ? 'Frankfurt' : 'Singapore'} warehouse ${index + 1}`,
+          replicator_id: 1,
+          config: { publication_name: 'publication' },
+        })),
       })
     },
   })
-  addAPIMock({
-    method: 'get',
-    path: '/platform/replication/:ref/pipelines',
-    response: () =>
-      HttpResponse.json<components['schemas']['PipelinesResponse_Output']>({ pipelines: [] }),
+
+  const routeId = '/project/$ref/database/pipelines/'
+  const route = createFileRoute(routeId)({
+    component: () => (
+      <ReplicationClusterProvider clusterId="2">
+        <PipelineRequestStatusProvider>
+          <ReplicationDiagram />
+        </PipelineRequestStatusProvider>
+      </ReplicationClusterProvider>
+    ),
   })
+  await renderRoute(route, { routeId, url: '/project/default/database/pipelines' })
 
-  customRender(
-    <ReplicationClusterProvider clusterId="2">
-      <PipelineRequestStatusProvider>
-        <ReplicationDiagram />
-      </PipelineRequestStatusProvider>
-    </ReplicationClusterProvider>
-  )
+  const overview = await screen.findByRole('region', { name: 'Pipeline overview' })
+  expect(within(overview).getByText('Primary database')).toBeVisible()
+  expect(await within(overview).findByText('East US (North Virginia)')).toBeVisible()
+  expect(within(overview).getByText('Pipelines', { exact: true })).toBeVisible()
+  expect(await within(overview).findByText('Singapore')).toBeVisible()
+  expect(await within(overview).findByText('Frankfurt')).toBeVisible()
 
-  expect(await screen.findByText('Singapore warehouse')).toBeInTheDocument()
-  expect(await screen.findByText('Frankfurt warehouse')).toBeInTheDocument()
+  if (count > 2) {
+    expect(screen.queryByRole('link', { name: /warehouse/ })).not.toBeInTheDocument()
+    expect(screen.getAllByText('3 pipelines')).toHaveLength(2)
+  } else {
+    for (let index = 0; index < count; index++) {
+      expect(
+        await screen.findByRole('link', { name: `Singapore warehouse ${index + 1}` })
+      ).toHaveAttribute('href', `/project/default/database/pipelines/${42 + index}`)
+      expect(
+        await screen.findByRole('link', { name: `Frankfurt warehouse ${index + 1}` })
+      ).toHaveAttribute('href', `/project/default/database/pipelines/${42 + index}?cluster_id=2`)
+    }
+  }
+  if (shared) {
+    expect(await within(overview).findByText('warehouse.shared_events')).toBeVisible()
+    expect(within(overview).getAllByText('BigQuery')).toHaveLength(1)
+    expect(within(overview).queryByText('Location unavailable')).not.toBeInTheDocument()
+  } else {
+    expect(await within(overview).findByText('warehouse.asia_events')).toBeVisible()
+    expect(await within(overview).findByText('warehouse.eu_events')).toBeVisible()
+    expect(within(overview).getAllByText('BigQuery')).toHaveLength(2)
+  }
 })

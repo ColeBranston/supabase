@@ -3,7 +3,7 @@ import { useRouter } from 'next/router'
 import { parseAsStringEnum, useQueryState } from 'nuqs'
 import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { Form, Separator } from 'ui'
+import { Button, Form, Separator } from 'ui'
 import { Admonition } from 'ui-patterns/Admonition'
 
 import { DestinationLogo } from '../DestinationLogo'
@@ -36,6 +36,7 @@ import { usePipelineDataValidation } from './usePipelineDataValidation'
 import { usePipelineNavigationGuard } from './usePipelineNavigationGuard'
 import { usePipelineReviewCosts } from './usePipelineReviewCosts'
 import { DiscardChangesConfirmationDialog } from '@/components/ui-patterns/Dialogs/DiscardChangesConfirmationDialog'
+import { AlertError } from '@/components/ui/AlertError'
 import { DocsButton } from '@/components/ui/DocsButton'
 import { SteppedFlow, SteppedFlowHeader } from '@/components/ui/SteppedFlow/SteppedFlow'
 import { useReplicationSourceId } from '@/data/replication/sources-query'
@@ -82,7 +83,12 @@ export const PipelineCreationFlow = ({
   const { validateConnection, resetValidation, isValidating, isConnectionVerified, failures } =
     usePipelineConnectionValidation({ projectRef, type, form })
   const sourceId = useReplicationSourceId({ projectRef })
-  const { ensureRegionSource, isCreatingSource } = useEnsurePipelineRegionSource(projectRef)
+  const {
+    ensureRegionSource,
+    isCreatingSource,
+    error: regionError,
+    reset: resetRegionError,
+  } = useEnsurePipelineRegionSource(projectRef)
   const {
     validateData,
     isValidatingData,
@@ -194,7 +200,25 @@ export const PipelineCreationFlow = ({
                     }}
                     renderLogo={(value) => <DestinationLogo type={value} />}
                   />
-                  <PipelineClusterSelector onChange={resetValidation} disabled={isBusy} />
+                  <PipelineClusterSelector
+                    onChange={() => {
+                      resetValidation()
+                      resetRegionError()
+                    }}
+                    disabled={isBusy}
+                  />
+                  {regionError && (
+                    <AlertError
+                      error={regionError}
+                      subject="Failed to prepare pipeline region"
+                      projectRef={projectRef}
+                      additionalActions={
+                        <Button disabled={isBusy} onClick={() => void handleNext()}>
+                          Retry
+                        </Button>
+                      }
+                    />
+                  )}
                 </div>
               )}
               {accessibleStep === 'connection' && (

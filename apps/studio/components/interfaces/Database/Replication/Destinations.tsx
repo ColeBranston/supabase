@@ -5,7 +5,7 @@ import { MoreVerticalIcon, PlusIcon, SearchIcon, WorkflowIcon, XIcon } from 'luc
 import { useRouter as useNextRouter } from 'next/compat/router'
 import Link from 'next/link'
 import { parseAsInteger, parseAsStringEnum, useQueryState } from 'nuqs'
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -50,24 +50,16 @@ import { TableRowNoResults } from '@/components/ui/TableRowNoResults'
 import {
   getReplicationRegionLabel,
   useReplicationClusterGroups,
-  type ReplicationRegion,
 } from '@/data/replication/clusters-query'
-import {
-  replicationDestinationsQueryOptions,
-  type ReplicationDestinationsData,
-} from '@/data/replication/destinations-query'
+import { replicationDestinationsQueryOptions } from '@/data/replication/destinations-query'
 import { replicationKeys } from '@/data/replication/keys'
-import {
-  replicationPipelineStatusQueryOptions,
-  type ReplicationPipelineStatusData,
-} from '@/data/replication/pipeline-status-query'
+import { replicationPipelineStatusQueryOptions } from '@/data/replication/pipeline-status-query'
 import { fetchReplicationPipelineVersion } from '@/data/replication/pipeline-version-query'
-import { replicationPipelinesQueryOptions, type Pipeline } from '@/data/replication/pipelines-query'
+import { replicationPipelinesQueryOptions } from '@/data/replication/pipelines-query'
 import { replicationSourcesQueryOptions } from '@/data/replication/sources-query'
 import { checkLocalPipelinesNotSetUp } from '@/data/replication/utils'
 import { useSelectedOrganizationQuery } from '@/hooks/misc/useSelectedOrganization'
 import { IS_PLATFORM } from '@/lib/constants'
-import type { StudioError } from '@/lib/errors/studio-errors'
 import { onSearchInputEscape } from '@/lib/keyboard'
 import { ReplicationClusterProvider } from '@/state/replication-cluster'
 import { SHORTCUT_IDS } from '@/state/shortcuts/registry'
@@ -86,17 +78,6 @@ const STATUS_SORT_ORDER: PipelineStatusName[] = [
   PipelineStatusName.UNKNOWN,
 ]
 
-// Keyed by pipeline id from the responses themselves, so this never closes over component state.
-const combinePipelineStatuses = (
-  results: { data?: ReplicationPipelineStatusData }[]
-): Map<string, PipelineStatusName | undefined> =>
-  new Map(
-    results
-      .map((result) => result.data)
-      .filter((data): data is ReplicationPipelineStatusData => data !== undefined)
-      .map((data) => [data.pipeline_id, getStatusName(data.status)])
-  )
-
 const compareStatusNames = (
   a: PipelineStatusName | undefined,
   b: PipelineStatusName | undefined,
@@ -107,50 +88,6 @@ const compareStatusNames = (
 
   const comparison = STATUS_SORT_ORDER.indexOf(a) - STATUS_SORT_ORDER.indexOf(b)
   return direction === 'asc' ? comparison : -comparison
-}
-
-const RegionRows = ({
-  region,
-  error,
-  isLoading,
-  hasRows,
-}: {
-  region?: ReplicationRegion
-  error: StudioError | null
-  isLoading: boolean
-  hasRows: boolean
-}) => {
-  if (!error && !isLoading && !hasRows) return null
-
-  return (
-    <>
-      <TableRow className="bg-surface-75 hover:bg-surface-75">
-        <TableCell colSpan={6} className="py-2 text-xs text-foreground-light">
-          <span className="font-medium text-foreground">{region?.region_name}</span>
-          {region?.region_code && (
-            <span className="ml-2 font-mono text-foreground-lighter">{region.region_code}</span>
-          )}
-        </TableCell>
-      </TableRow>
-      {isLoading && (
-        <TableRow>
-          <TableCell colSpan={6}>
-            <ShimmeringLoader />
-          </TableCell>
-        </TableRow>
-      )}
-      {error && (
-        <TableRow>
-          <TableCell colSpan={6}>
-            <AlertError
-              error={error}
-              subject={`Failed to retrieve pipelines in ${getReplicationRegionLabel(region)}`}
-            />
-          </TableCell>
-        </TableRow>
-      )}
-    </>
-  )
 }
 
 export const Destinations = () => {
@@ -209,13 +146,6 @@ export const Destinations = () => {
     ),
   })
 
-  const filterDestinations = <T extends { name: string }>(destinations: T[]) =>
-    filterString.length === 0
-      ? destinations
-      : destinations.filter((destination) =>
-          destination.name.toLowerCase().includes(filterString.toLowerCase())
-        )
-
   const clusterResults = groups.map((group, index) => {
     const destinationsResult = destinationResults[index]
     const pipelinesResult = pipelineResults[index]
@@ -225,7 +155,6 @@ export const Destinations = () => {
       destinationsResult,
       pipelinesResult,
       destinations,
-      filteredDestinations: filterDestinations(destinations),
       pipelines: pipelinesResult.data?.pipelines ?? [],
       hasError:
         destinationsResult.isError && !checkLocalPipelinesNotSetUp(destinationsResult.error),
@@ -235,30 +164,26 @@ export const Destinations = () => {
   const { error: destinationsError, isError: isDestinationsError } = destinationResults[0]
   const isDestinationsLoading = destinationResults.some((result) => result.isPending)
   const hasDestinations = clusterResults.some(({ destinations }) => destinations.length > 0)
-  const hasFilteredDestinations = clusterResults.some(
-    ({ filteredDestinations }) => filteredDestinations.length > 0
-  )
   const hasClusterErrors = clusterResults.some(({ hasError }) => hasError)
+  const shouldShowTable = hasDestinations || (hasMultipleRegions && hasClusterErrors)
+  const tableColumnCount = 6
 
-  // Sorting by status needs every pipeline's status up here, not just inside each row. These share
-  // the rows' query keys, so each status is still only fetched once.
-  const statusByPipelineId = useQueries({
-    queries: clusterResults.flatMap(({ group, pipelines }) =>
-      pipelines.map((pipeline) =>
-        replicationPipelineStatusQueryOptions({
-          projectRef,
-          pipelineId: pipeline.id,
-          clusterId: group.clusterId,
-        })
-      )
+  const pipelineEntries = clusterResults.flatMap(({ group, pipelines }) =>
+    pipelines.map((pipeline) => ({ pipeline, clusterId: group.clusterId }))
+  )
+
+  // These queries share the rows' query keys, so each status is fetched once per pipeline.
+  const statusResults = useQueries({
+    queries: pipelineEntries.map(({ pipeline, clusterId }) =>
+      replicationPipelineStatusQueryOptions({ projectRef, pipelineId: pipeline.id, clusterId })
     ),
-    combine: combinePipelineStatuses,
   })
-
-  const getDestinationStatus = (pipelines: Pipeline[], destinationId: number) => {
-    const pipeline = pipelines.find((p) => p.destination_id === destinationId)
-    return pipeline === undefined ? undefined : statusByPipelineId.get(pipeline.id)
-  }
+  const statuses = new Map(
+    pipelineEntries.map(({ pipeline }, index) => [
+      pipeline,
+      getStatusName(statusResults[index].data?.status),
+    ])
+  )
 
   const [sort, setSort] = useState<DestinationSort>('name:asc')
   const [sortColumn, sortDirection] = sort.split(':') as [DestinationSortColumn, 'asc' | 'desc']
@@ -273,27 +198,21 @@ export const Destinations = () => {
     setSort(`${column}:${sortDirection === 'asc' ? 'desc' : 'asc'}`)
   }
 
-  // Not memoized: the status map is rebuilt whenever a pipeline status refetches, so a useMemo
-  // here would never hit. Sorting a handful of destinations per render costs nothing.
-  const sortDestinations = (
-    destinations: ReplicationDestinationsData['destinations'],
-    pipelines: Pipeline[]
-  ) =>
-    [...destinations].sort((a, b) => {
-      if (sortColumn === 'status') {
-        const nameComparison = a.name.localeCompare(b.name)
-
-        return (
-          compareStatusNames(
-            getDestinationStatus(pipelines, a.id),
-            getDestinationStatus(pipelines, b.id),
-            sortDirection
-          ) || (sortDirection === 'asc' ? nameComparison : -nameComparison)
-        )
-      }
-
-      const comparison = a.name.localeCompare(b.name)
-      return sortDirection === 'asc' ? comparison : -comparison
+  const search = filterString.toLowerCase()
+  const sortedDestinations = clusterResults
+    .flatMap(({ group, destinations, pipelines }) =>
+      destinations
+        .filter(({ name }) => name.toLowerCase().includes(search))
+        .map((destination) => {
+          const pipeline = pipelines.find((pipeline) => pipeline.destination_id === destination.id)
+          return { group, destination, status: pipeline && statuses.get(pipeline) }
+        })
+    )
+    .sort((a, b) => {
+      const comparison = a.destination.name.localeCompare(b.destination.name)
+      const nameComparison = sortDirection === 'asc' ? comparison : -comparison
+      if (sortColumn === 'name') return nameComparison
+      return compareStatusNames(a.status, b.status, sortDirection) || nameComparison
     })
 
   const {
@@ -406,7 +325,7 @@ export const Destinations = () => {
   }, [projectRef, clusterResults, queryClient])
 
   return (
-    <div className="w-full space-y-4">
+    <div id="pipeline-list" className="w-full space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center">
           <Input
@@ -528,77 +447,90 @@ export const Destinations = () => {
           <AlertError error={destinationsError} subject="Failed to retrieve pipelines" />
         )}
 
-        {isDestinationsLoading && (
-          <GenericTableLoader headers={[null, 'Name', 'Status', 'Lag', 'Publication', null]} />
+        {isDestinationsLoading && !shouldShowTable && (
+          <GenericTableLoader headers={[null, 'Pipeline', 'Status', 'Region', 'Lag', null]} />
         )}
 
-        {!isDestinationsLoading &&
-          (hasDestinations || (hasMultipleRegions && hasClusterErrors)) && (
-            <Card>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead key="type" className="w-[40px]" />
-                      <TableHead key="name" className="w-[250px]" aria-sort={getAriaSort('name')}>
-                        <TableHeadSort
-                          column="name"
-                          currentSort={sort}
-                          onSortChange={handleSortChange}
-                        >
-                          Name
-                        </TableHeadSort>
-                      </TableHead>
-                      <TableHead
-                        key="status"
-                        className="w-[150px]"
-                        aria-sort={getAriaSort('status')}
+        {shouldShowTable && (
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead key="type" className="w-[40px]" />
+                    <TableHead key="name" className="w-[250px]" aria-sort={getAriaSort('name')}>
+                      <TableHeadSort
+                        column="name"
+                        currentSort={sort}
+                        onSortChange={handleSortChange}
                       >
-                        <TableHeadSort
-                          column="status"
-                          currentSort={sort}
-                          onSortChange={handleSortChange}
-                        >
-                          Status
-                        </TableHeadSort>
-                      </TableHead>
-                      <TableHead key="lag" className="w-[150px]">
-                        Lag
-                      </TableHead>
-                      <TableHead key="publication">Publication</TableHead>
-                      <TableHead key="actions" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {clusterResults.map((result) => (
-                      <ReplicationClusterProvider
-                        key={result.group.clusterId ?? 'default'}
-                        clusterId={result.group.clusterId}
+                        Pipeline
+                      </TableHeadSort>
+                    </TableHead>
+                    <TableHead key="status" className="w-[150px]" aria-sort={getAriaSort('status')}>
+                      <TableHeadSort
+                        column="status"
+                        currentSort={sort}
+                        onSortChange={handleSortChange}
                       >
-                        {hasMultipleRegions && (
-                          <RegionRows
-                            region={result.group.region}
-                            error={result.hasError ? result.destinationsResult.error : null}
-                            isLoading={result.destinationsResult.isPending}
-                            hasRows={result.filteredDestinations.length > 0}
-                          />
-                        )}
-                        {sortDestinations(result.filteredDestinations, result.pipelines).map(
-                          (destination) => (
-                            <DestinationRow key={destination.id} destinationId={destination.id} />
-                          )
-                        )}
-                      </ReplicationClusterProvider>
-                    ))}
+                        Status
+                      </TableHeadSort>
+                    </TableHead>
+                    <TableHead key="region">Region</TableHead>
+                    <TableHead key="lag" className="w-[150px]">
+                      Lag
+                    </TableHead>
+                    <TableHead key="actions" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sortedDestinations.map(({ group, destination }) => (
+                    <ReplicationClusterProvider
+                      key={`${group.clusterId ?? 'default'}:${destination.id}`}
+                      clusterId={group.clusterId}
+                    >
+                      <DestinationRow
+                        destinationId={destination.id}
+                        pipelineRegion={group.region?.region_name}
+                        pipelineRegionCode={group.region?.region_code ?? undefined}
+                      />
+                    </ReplicationClusterProvider>
+                  ))}
+                  {hasMultipleRegions &&
+                    clusterResults.map(({ group, destinationsResult, hasError }) => {
+                      const regionLabel = getReplicationRegionLabel(group.region)
+                      return (
+                        <Fragment key={group.clusterId ?? 'default'}>
+                          {destinationsResult.isPending && (
+                            <TableRow>
+                              <TableCell colSpan={tableColumnCount}>
+                                <span className="sr-only">Loading pipelines in {regionLabel}</span>
+                                <ShimmeringLoader />
+                              </TableCell>
+                            </TableRow>
+                          )}
+                          {hasError && (
+                            <TableRow>
+                              <TableCell colSpan={tableColumnCount}>
+                                <AlertError
+                                  error={destinationsResult.error}
+                                  subject={`Failed to retrieve pipelines in ${regionLabel}`}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </Fragment>
+                      )
+                    })}
 
-                    {!isDestinationsLoading && !hasFilteredDestinations && hasDestinations && (
-                      <TableRowNoResults colSpan={6} search={filterString} />
-                    )}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          )}
+                  {!isDestinationsLoading && sortedDestinations.length === 0 && hasDestinations && (
+                    <TableRowNoResults colSpan={tableColumnCount} search={filterString} />
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
 
         {!isDestinationsLoading && !hasDestinations && !hasErrorsFetchingData && (
           <EmptyStatePresentational

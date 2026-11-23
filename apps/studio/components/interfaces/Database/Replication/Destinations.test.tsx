@@ -43,6 +43,7 @@ vi.mock('next/compat/router', () => ({
   useRouter: () => ({ push: options.push, events: { on: vi.fn(), off: vi.fn() } }),
 }))
 vi.mock('@/components/interfaces/App/FeaturePreview/FeaturePreviewContext', () => ({
+  useUnifiedLogsPreview: () => ({ isEnabled: false }),
   usePipelineCreationPreview: () => ({
     isEnabled: options.wizard,
     isLoading: options.previewLoading,
@@ -357,14 +358,18 @@ describe('regions', () => {
     new URL(request.url).searchParams.get('cluster_id') ?? 'omitted'
   const regionName = (cluster: string) => (cluster === '2' ? 'Frankfurt' : 'Singapore')
 
-  const mockRegionResources = ({ failingCluster }: { failingCluster?: string } = {}) => {
+  const mockRegionResources = ({
+    failingCluster,
+    pendingFrankfurt,
+  }: { failingCluster?: string; pendingFrankfurt?: Promise<void> } = {}) => {
     const statusRequests: string[] = []
     isEnabled = true
     addAPIMock({
       method: 'get',
       path: '/platform/replication/:ref/destinations',
-      response: ({ request }) => {
+      response: async ({ request }) => {
         const cluster = clusterOf(request)
+        if (cluster === '2') await pendingFrankfurt
         if (cluster === failingCluster)
           return HttpResponse.json<APIErrorBody>(
             { message: 'Cluster unavailable' },
@@ -422,7 +427,7 @@ describe('regions', () => {
         statusRequests.push(`${params.pipeline_id}:${clusterOf(request)}`)
         return HttpResponse.json<components['schemas']['PipelineStatusResponse_Output']>({
           pipeline_id: String(params.pipeline_id),
-          status: { name: 'started' },
+          status: { name: clusterOf(request) === '2' ? 'started' : 'failed' },
         })
       },
     })
@@ -472,25 +477,30 @@ describe('regions', () => {
       }
     )
 
-  test('shows a single region like before, without region labels or cluster_id', async () => {
+  test('shows the pipeline region for a single region without cluster_id', async () => {
     const { statusRequests } = mockRegionResources()
     renderRegions()
 
-    expect(await screen.findByText('Singapore sync')).toBeInTheDocument()
-    expect(screen.queryByText('ap-southeast-1')).not.toBeInTheDocument()
+    const row = (await screen.findByText('Singapore sync')).closest('tr')
+    expect(within(row!).getByRole('cell', { name: 'Singapore' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Region' })).toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'Publication' })).not.toBeInTheDocument()
     await waitFor(() => expect(statusRequests).toContain('42:omitted'))
     expect(statusRequests.every((request) => request.endsWith(':omitted'))).toBe(true)
   })
 
-  test('groups pipelines by region and routes each pipeline to its own cluster', async () => {
+  test('shows each pipeline region and routes each pipeline to its cluster', async () => {
     mockRegions()
     const { statusRequests } = mockRegionResources()
     renderRegions()
 
     const singapore = (await screen.findByText('Singapore sync')).closest('tr')
     const frankfurt = (await screen.findByText('Frankfurt sync')).closest('tr')
-    expect(screen.getByText('ap-southeast-1')).toBeInTheDocument()
-    expect(screen.getByText('eu-central-1')).toBeInTheDocument()
+    expect(within(singapore!).getByRole('cell', { name: 'Singapore' })).toBeInTheDocument()
+    expect(within(frankfurt!).getByRole('cell', { name: 'Frankfurt' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Region' })).toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'Publication' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('row').slice(1)).toEqual([frankfurt, singapore])
     await waitFor(() =>
       expect(statusRequests).toEqual(expect.arrayContaining(['42:omitted', 'frankfurtpipeline:2']))
     )
@@ -516,6 +526,45 @@ describe('regions', () => {
         '/project/default/database/pipelines/42'
       )
     )
+  })
+
+  test('sorts and filters pipelines across regions', async () => {
+    mockRegions()
+    mockRegionResources()
+    renderRegions()
+
+    await screen.findByText('Failed')
+    await screen.findByText('Running')
+    const singapore = screen.getByRole('row', { name: /Singapore sync/ })
+    const frankfurt = screen.getByRole('row', { name: /Frankfurt sync/ })
+    fireEvent.click(
+      within(screen.getByRole('columnheader', { name: 'Status' })).getByRole('button')
+    )
+    expect(screen.getAllByRole('row').slice(1)).toEqual([singapore, frankfurt])
+
+    fireEvent.change(screen.getByPlaceholderText('Search pipelines'), {
+      target: { value: 'FRANKFURT' },
+    })
+    expect(screen.getAllByRole('row').slice(1)).toEqual([frankfurt])
+    expect(screen.queryByRole('row', { name: /Singapore sync/ })).not.toBeInTheDocument()
+  })
+
+  test('shows loaded pipelines while another region is loading', async () => {
+    mockRegions()
+    let finishFrankfurt = () => {}
+    const pendingFrankfurt = new Promise<void>((resolve) => {
+      finishFrankfurt = resolve
+    })
+    mockRegionResources({ pendingFrankfurt })
+    renderRegions()
+
+    expect(await screen.findByText('Singapore sync')).toBeInTheDocument()
+    expect(screen.getByText('Loading pipelines in Frankfurt (eu-central-1)')).toBeInTheDocument()
+    finishFrankfurt()
+    expect(await screen.findByText('Frankfurt sync')).toBeInTheDocument()
+    expect(
+      screen.queryByText('Loading pipelines in Frankfurt (eu-central-1)')
+    ).not.toBeInTheDocument()
   })
 
   test('keeps loading when an empty region finishes before another region', async () => {

@@ -4,6 +4,7 @@ import {
   CircleStopIcon,
   EditIcon,
   EyeIcon,
+  FileTextIcon,
   MoreVerticalIcon,
   PlayIcon,
   RotateCcwIcon,
@@ -26,12 +27,17 @@ import {
 } from 'ui'
 import { ShimmeringLoader } from 'ui-patterns/ShimmeringLoader'
 
-import { getStatusName } from './Pipeline.utils'
+import {
+  getPipelineLegacyLogsUrl,
+  getPipelineUnifiedLogsUrl,
+  getStatusName,
+} from './Pipeline.utils'
 import { PipelineStatusName } from './Replication.constants'
 import {
   canModifyDestination,
   type ReplicationDestinationType,
 } from './ReplicationDiagram/Nodes.utils'
+import { useUnifiedLogsPreview } from '@/components/interfaces/App/FeaturePreview/FeaturePreviewContext'
 import { withReplicationCluster } from '@/data/replication/cluster-path'
 import { ReplicationPipelineStatusData } from '@/data/replication/pipeline-status-query'
 import { Pipeline } from '@/data/replication/pipelines-query'
@@ -71,6 +77,7 @@ export const RowMenu = ({
   onUpdateClick,
 }: RowMenuProps) => {
   const { ref: projectRef } = useParams()
+  const { isEnabled: isUnifiedLogsEnabled } = useUnifiedLogsPreview()
   const clusterId = useReplicationClusterId()
   const statusName = getStatusName(pipelineStatus)
 
@@ -202,6 +209,18 @@ export const RowMenu = ({
               <p>View details</p>
             </Link>
           </DropdownMenuItem>
+          {pipeline && (
+            <DropdownMenuItem asChild className="gap-x-2">
+              <Link
+                href={(isUnifiedLogsEnabled ? getPipelineUnifiedLogsUrl : getPipelineLegacyLogsUrl)(
+                  { projectRef, pipelineId: pipeline.id }
+                )}
+              >
+                <FileTextIcon size={14} />
+                <span>View logs</span>
+              </Link>
+            </DropdownMenuItem>
+          )}
           <DropdownMenuSeparator />
           {shouldShowUpdate && (
             <>

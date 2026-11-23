@@ -169,6 +169,7 @@ describe('DestinationRow', () => {
       await userEvent.click(await screen.findByRole('button', { name: 'Pipeline options' }))
       expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
         'View details',
+        'View logs',
         ...(status === 'stopped' ? [] : ['Stop pipeline']),
         'Delete pipeline',
       ])
@@ -228,7 +229,7 @@ describe('DestinationRow', () => {
 
     await act(async () => finishPipelineRequest())
 
-    expect(await screen.findByText('supabase_realtime')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Pipeline options' })).toBeInTheDocument()
     expect(row).toHaveAttribute('tabindex', '0')
     expect(screen.getByRole('button', { name: 'Pipeline options' })).toBeInTheDocument()
   })
@@ -276,7 +277,7 @@ describe('DestinationRow', () => {
       },
     })
     customRender(<DestinationRow destinationId={DESTINATION_ID} />)
-    await screen.findByText('supabase_realtime')
+    await screen.findByRole('button', { name: 'Pipeline options' })
     await userEvent.click(screen.getByRole('button', { name: 'Pipeline options' }))
     await userEvent.click(screen.getByRole('menuitem', { name: 'Delete pipeline' }))
     await userEvent.click(screen.getByPlaceholderText('Type the pipeline name'))
@@ -335,7 +336,7 @@ describe('DestinationRow', () => {
     })
     const queryClient = new QueryClient()
     customRender(<DestinationRow destinationId={DESTINATION_ID} />, { queryClient })
-    await screen.findByText('supabase_realtime')
+    await screen.findByRole('button', { name: 'Pipeline options' })
     await userEvent.click(screen.getByRole('button', { name: 'Pipeline options' }))
     await userEvent.click(screen.getByRole('menuitem', { name: 'Delete pipeline' }))
     await userEvent.click(screen.getByPlaceholderText('Type the pipeline name'))
@@ -363,48 +364,13 @@ describe('DestinationRow', () => {
 
     customRender(<DestinationRow destinationId={DESTINATION_ID} />)
 
-    const row = (await screen.findByText('supabase_realtime')).closest('tr')
+    const row = (await screen.findByRole('button', { name: 'Pipeline options' })).closest('tr')
     expect(row).not.toBeNull()
-    expect(screen.getByText(`#${PIPELINE_ID}`)).toBeVisible()
-    expect(screen.getByRole('button', { name: `Copy pipeline ID ${PIPELINE_ID}` })).toHaveAttribute(
-      'title',
-      PIPELINE_ID
-    )
+    expect(screen.queryByText(`#${PIPELINE_ID}`)).not.toBeInTheDocument()
     await userEvent.click(row!)
 
     expect(routerMock.asPath).toBe(`/project/default/database/pipelines/${PIPELINE_ID}`)
   })
-
-  test.each(['click', 'keyboard'])(
-    'copies the full ID using %s without navigating',
-    async (interaction) => {
-      const user = userEvent.setup()
-      addAllMocks()
-      routerMock.setCurrentUrl('/project/default/database/pipelines')
-      customRender(
-        <Table>
-          <TableBody>
-            <DestinationRow destinationId={DESTINATION_ID} />
-          </TableBody>
-        </Table>
-      )
-      const copyButton = await screen.findByRole('button', {
-        name: `Copy pipeline ID ${PIPELINE_ID}`,
-      })
-      if (interaction === 'click') {
-        await user.click(copyButton)
-      } else {
-        copyButton.focus()
-        await user.keyboard('{Enter}')
-      }
-      expect(await navigator.clipboard.readText()).toBe(PIPELINE_ID)
-      expect(await screen.findByText(`Pipeline ID ${PIPELINE_ID} copied`)).toHaveAttribute(
-        'aria-live',
-        'polite'
-      )
-      expect(routerMock.asPath).toBe('/project/default/database/pipelines')
-    }
-  )
 
   test('does not navigate when the row overflow menu is opened', async () => {
     addAllMocks()
@@ -412,7 +378,7 @@ describe('DestinationRow', () => {
 
     customRender(<DestinationRow destinationId={DESTINATION_ID} />)
 
-    await screen.findByText('supabase_realtime')
+    await screen.findByRole('button', { name: 'Pipeline options' })
     await userEvent.click(screen.getByRole('button', { name: 'Pipeline options' }))
     expect(screen.getByRole('menuitem', { name: 'View details' })).toHaveAttribute(
       'href',

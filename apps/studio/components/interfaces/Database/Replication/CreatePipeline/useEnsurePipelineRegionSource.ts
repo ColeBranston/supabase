@@ -1,6 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCallback } from 'react'
-import { toast } from 'sonner'
 
 import { classifyError } from '@/data/error-classification'
 import { useCreateTenantSourceMutation } from '@/data/replication/create-tenant-source-mutation'
@@ -31,7 +30,6 @@ export const useEnsurePipelineRegionSource = (projectRef: string | undefined) =>
         throw classifyError(error)
       }
     },
-    onError: (error) => toast.error(`Failed to prepare pipeline region: ${error.message}`),
   })
 
   const ensureRegionSource = useCallback(

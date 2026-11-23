@@ -218,9 +218,8 @@ describe('ReplicationPipelineLayout', () => {
   })
 
   test.each(['00150', '03h6pes1npx2ptvf052my5nx2'.repeat(4)])(
-    'copies the full pipeline ID %s from the detail header',
+    'shows the full pipeline ID %s in the overview without a copy action',
     async (pipelineId) => {
-      const user = userEvent.setup()
       routeParams.pipelineId = pipelineId
       mockPipeline(pipelineId)
       mockVersion(false, pipelineId)
@@ -228,12 +227,11 @@ describe('ReplicationPipelineLayout', () => {
 
       renderLayout()
 
-      const copyButton = await screen.findByRole('button', {
-        name: `Copy pipeline ID ${pipelineId}`,
-      })
-      expect(copyButton).toHaveAttribute('title', pipelineId)
-      await user.click(copyButton)
-      expect(await navigator.clipboard.readText()).toBe(pipelineId)
+      expect(await screen.findByText(pipelineId)).toBeVisible()
+      expect(screen.getByRole('heading', { name: 'Overview' })).toBeVisible()
+      expect(
+        screen.queryByRole('button', { name: `Copy pipeline ID ${pipelineId}` })
+      ).not.toBeInTheDocument()
     }
   )
 
@@ -426,8 +424,7 @@ describe('ReplicationPipelineLayout', () => {
 
     renderLayout()
 
-    expect(screen.getByText('Primary database')).toBeVisible()
-    expect(screen.getByText('Loading destination')).toBeInTheDocument()
+    expect(screen.getByText('Loading pipeline details')).toBeInTheDocument()
     expect(screen.queryByText('Running')).not.toBeInTheDocument()
 
     resolvePipeline(PIPELINE)

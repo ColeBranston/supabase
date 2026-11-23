@@ -3,7 +3,10 @@ import { parseAsString, useQueryState } from 'nuqs'
 import { useEffect, useRef } from 'react'
 import { FormItemLayout } from 'ui-patterns/form/FormItemLayout/FormItemLayout'
 
-import { PipelineRegionSelect } from './DestinationPanel/DestinationForm/PipelineRegionField'
+import {
+  PipelineRegionReadonly,
+  PipelineRegionSelect,
+} from './DestinationPanel/DestinationForm/PipelineRegionField'
 import { usePreferredPipelineClusterId } from './usePreferredPipelineClusterId'
 import { replicationClustersQueryOptions } from '@/data/replication/clusters-query'
 import { useReplicationClusterId } from '@/state/replication-cluster'
@@ -34,8 +37,6 @@ export const PipelineClusterSelector = ({
     }
   }, [preferredCluster.isReady, preferredCluster.clusterId, urlClusterId, setClusterId])
 
-  if (!data || data.regions.length <= 1) return null
-
   return (
     <FormItemLayout
       isReactForm={false}
@@ -43,14 +44,18 @@ export const PipelineClusterSelector = ({
       label="Pipeline region"
       description="The pipeline runs from this region. Destination connections originate here."
     >
-      <PipelineRegionSelect
-        disabled={disabled || !preferredCluster.isReady}
-        value={clusterId ?? data.default_cluster_id}
-        onValueChange={(value) => {
-          void setClusterId(value)
-          onChange?.()
-        }}
-      />
+      {data && data.regions.length > 1 ? (
+        <PipelineRegionSelect
+          disabled={disabled || !preferredCluster.isReady}
+          value={clusterId ?? data.default_cluster_id}
+          onValueChange={(value) => {
+            void setClusterId(value)
+            onChange?.()
+          }}
+        />
+      ) : (
+        <PipelineRegionReadonly />
+      )}
     </FormItemLayout>
   )
 }
