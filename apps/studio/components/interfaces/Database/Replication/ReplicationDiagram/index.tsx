@@ -105,7 +105,7 @@ export const ReplicationDiagram = ({
   ]
   const regionHeights = regions.map(({ entries }) => (isCompact ? 88 : 60 + entries.length * 56))
   const regionsHeight = regionHeights.reduce((total, height) => total + height + 32, -32)
-  const destinationsHeight = destinations.length * 112 - 24
+  const destinationsHeight = (destinations.length - 1) * 112 + 64
   const contentHeight = Math.max(regionsHeight, destinationsHeight)
   const sourceRegion = Object.values(AWS_REGIONS).find(({ code }) => code === project?.region)
   const nodes: OverviewNode[] = [
@@ -323,7 +323,7 @@ export const ReplicationDiagram = ({
       className="instance-configuration overflow-x-auto rounded-md border border-muted"
       style={diagramStyle}
     >
-      <OverviewGraph nodes={groupedNodes} edges={edges} height={contentHeight + 112} />
+      <OverviewGraph nodes={groupedNodes} edges={edges} height={contentHeight + 28 + 24 * 2 + 8} />
     </section>
   )
 }
