@@ -64,7 +64,7 @@ import {
   getStatusName,
 } from './Pipeline.utils'
 import { PipelineId } from './PipelineId'
-import { PipelineNoticeContext, PipelineTableNoticeContext } from './PipelineNoticeContext'
+import { PipelineNoticeContext } from './PipelineNoticeContext'
 import { PipelineStatePill } from './PipelineStatePill'
 import { PipelineStatusName } from './Replication.constants'
 import { ReplicationDiagram } from './ReplicationDiagram'
@@ -129,7 +129,6 @@ export const ReplicationPipelineLayout = ({ children }: PropsWithChildren) => {
   const [showUpdateVersionModal, setShowUpdateVersionModal] = useState(false)
   const [showDeleteDestination, setShowDeleteDestination] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [tableNoticeTarget, setTableNoticeTarget] = useState<HTMLDivElement | null>(null)
   const [, setEdit] = useQueryState(
     'edit',
     parseAsInteger.withOptions({ history: 'push', clearOnDefault: true })
@@ -180,8 +179,6 @@ export const ReplicationPipelineLayout = ({ children }: PropsWithChildren) => {
       { projectRef, pipelineId },
       { enabled: !!pipelineId }
     )
-  const hasTableErrors =
-    replicationStatusData?.table_statuses.some(({ state }) => state.name === 'error') === true
   const lag = getFormattedLagValue(
     'bytes',
     replicationStatusData?.apply_lag?.confirmed_flush_lsn_bytes
@@ -583,10 +580,6 @@ export const ReplicationPipelineLayout = ({ children }: PropsWithChildren) => {
               description="We can’t reach this pipeline right now. We’re retrying automatically."
             />
           )}
-          {hasTableErrors &&
-            statusName === PipelineStatusName.STARTED &&
-            !isTransitioning &&
-            !isLagError && <div ref={setTableNoticeTarget} />}
           <ReplicationDiagram pipelineId={pipeline.id} clusterId={clusterId} />
           <PageSection className="pt-6 last:pb-0">
             <PageSectionMeta>
@@ -655,9 +648,7 @@ export const ReplicationPipelineLayout = ({ children }: PropsWithChildren) => {
       )}
 
       <PipelineNoticeContext.Provider value={true}>
-        <PipelineTableNoticeContext.Provider value={tableNoticeTarget}>
-          {!isUnknownDestination && (canModify || pipelineError) && children}
-        </PipelineTableNoticeContext.Provider>
+        {!isUnknownDestination && (canModify || pipelineError) && children}
       </PipelineNoticeContext.Provider>
 
       <DestinationPanel />
